@@ -10,7 +10,7 @@ import {
   saveConfig,
   uploadInstructorPdf,
 } from '../firestore'
-import { generateQuestions } from '../llm'
+import { generateQuestions, extractQuestionsFromPdf, extractTextFromPdf } from '../llm'
 import type { AppConfig, LLMConfig, Question } from '../types'
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -249,6 +249,12 @@ export default function AdminPage() {
   const [uploadingPdf, setUploadingPdf] = useState(false)
   const [pdfMsg, setPdfMsg] = useState('')
 
+  // PDF import state (question bank)
+  const [importingPdf, setImportingPdf] = useState(false)
+  const [importResults, setImportResults] = useState<Omit<Question, 'id' | 'createdAt'>[]>([])
+  const [importError, setImportError] = useState('')
+  const [importMsg, setImportMsg] = useState('')
+
   // AI generation state
   const [genCount, setGenCount] = useState(5)
   const [genTopic, setGenTopic] = useState('')
@@ -328,6 +334,54 @@ export default function AdminPage() {
     setDeleteConfirm(null)
   }
 
+  // ── PDF question bank import ────────────────────────────────────────────────
+
+  const handleImportPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Need a configured LLM to parse the PDF
+    const llmCfg = config.llm1.provider !== 'none' ? config.llm1 : config.llm2
+    if (llmCfg.provider === 'none' || !llmCfg.apiKey) {
+      setImportError('Configure at least one LLM in Settings before importing.')
+      return
+    }
+    setImportingPdf(true)
+    setImportError('')
+    setImportMsg('')
+    setImportResults([])
+    // Reset the file input so the same file can be re-selected if needed
+    e.target.value = ''
+    try {
+      const text = await extractTextFromPdf(file)
+      const parsed = await extractQuestionsFromPdf(llmCfg, text)
+      if (parsed.length === 0) {
+        setImportError('No questions could be extracted from this PDF. Check the format.')
+      } else {
+        setImportResults(parsed)
+        setImportMsg(`${parsed.length} questions extracted — review and add to bank below.`)
+      }
+    } catch (err: unknown) {
+      setImportError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImportingPdf(false)
+    }
+  }
+
+  const handleAddImported = async (q: Omit<Question, 'id' | 'createdAt'>) => {
+    const id = await addQuestion({ ...q, createdAt: Date.now() })
+    setQuestions((prev) => [{ id, ...q, createdAt: Date.now() }, ...prev])
+    setImportResults((prev) => prev.filter((r) => r !== q))
+  }
+
+  const handleAddAllImported = async () => {
+    for (const q of importResults) {
+      const id = await addQuestion({ ...q, createdAt: Date.now() })
+      setQuestions((prev) => [{ id, ...q, createdAt: Date.now() }, ...prev])
+    }
+    setImportResults([])
+    setImportMsg('All questions added to the bank.')
+  }
+
   // ── AI generation actions ───────────────────────────────────────────────────
 
   const handleGenerate = async () => {
@@ -340,7 +394,9 @@ export default function AdminPage() {
     setGenError('')
     setGenResults([])
     try {
-      const results = await generateQuestions(llmCfg, genCount, genTopic || undefined)
+      // Pass a random sample of existing questions as few-shot style examples
+      const shuffled = [...questions].sort(() => Math.random() - 0.5)
+      const results = await generateQuestions(llmCfg, genCount, genTopic || undefined, shuffled.slice(0, 3))
       setGenResults(results)
     } catch (err: unknown) {
       setGenError(err instanceof Error ? err.message : 'Generation failed')
@@ -414,7 +470,16 @@ export default function AdminPage() {
           /* ── Questions Tab ─────────────────────────────────────────────── */
           tab === 'questions' ? (
             <>
-              <div className="flex justify-end">
+              <div className="flex gap-2 justify-end flex-wrap">
+                {/* PDF question bank import */}
+                <label className={`cursor-pointer inline-flex items-center gap-2 border border-indigo-300 text-indigo-600 hover:bg-indigo-50 text-sm font-medium px-4 py-2 rounded-lg transition-colors ${importingPdf ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  {importingPdf ? 'Importing…' : 'Import PDF Bank'}
+                  <input type="file" accept="application/pdf" className="hidden" onChange={handleImportPdf} disabled={importingPdf} />
+                </label>
                 <button
                   onClick={() => setShowAddForm(true)}
                   disabled={showAddForm}
@@ -423,6 +488,52 @@ export default function AdminPage() {
                   + Add Question
                 </button>
               </div>
+
+              {/* Import status / errors */}
+              {importError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{importError}</p>
+              )}
+              {importMsg && importResults.length === 0 && (
+                <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2">{importMsg}</p>
+              )}
+
+              {/* Extracted questions preview */}
+              {importResults.length > 0 && (
+                <SectionCard title={`📄 Imported from PDF — ${importResults.length} questions to review`}>
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Review each question before adding to the bank. Edit manually if needed after adding.</p>
+                    <button
+                      onClick={handleAddAllImported}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                    >
+                      Add All {importResults.length} Questions to Bank
+                    </button>
+                    {importResults.map((q, i) => (
+                      <div key={i} className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
+                        <p className="text-sm font-medium text-gray-900">{q.text}</p>
+                        {q.topic && (
+                          <span className="inline-block text-xs bg-indigo-50 text-indigo-600 rounded-full px-2 py-0.5">{q.topic}</span>
+                        )}
+                        <div className="space-y-1">
+                          {q.options.map((opt, j) => (
+                            <div key={j} className={`text-xs rounded-lg px-3 py-1.5 flex gap-2 ${j === q.answer ? 'bg-green-50 text-green-700 font-medium' : 'bg-white text-gray-500'}`}>
+                              <span>{['A','B','C','D'][j]}.</span>
+                              <span>{opt}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {q.explanation && <p className="text-xs text-gray-400 italic">{q.explanation}</p>}
+                        <button
+                          onClick={() => handleAddImported(q)}
+                          className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                          Add to Bank
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
 
               {showAddForm && (
                 <SectionCard title="New Question">
