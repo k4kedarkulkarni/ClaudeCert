@@ -296,11 +296,12 @@ export default function AdminPage() {
       const updated = { ...config, instructorPdfUrl: url }
       setConfig(updated)
       await saveConfig(updated)
-      setPdfMsg('PDF uploaded and saved.')
-    } catch {
-      setPdfMsg('Upload failed.')
+      setPdfMsg('PDF uploaded and saved. Reload the Instructor Guide tab to see it.')
+    } catch (err: unknown) {
+      setPdfMsg(`Upload failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setUploadingPdf(false)
+      e.target.value = ''
     }
   }
 

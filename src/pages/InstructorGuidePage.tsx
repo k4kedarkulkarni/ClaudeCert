@@ -14,14 +14,22 @@ export default function InstructorGuidePage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [numPages, setNumPages] = useState<number>(0)
   const [loading, setLoading] = useState(true)
+  const [pdfError, setPdfError] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(600)
 
+  // Re-fetch every time this component mounts (i.e. every time the tab is switched to)
   useEffect(() => {
-    fetchConfig().then((cfg) => {
-      if (cfg?.instructorPdfUrl) setPdfUrl(cfg.instructorPdfUrl)
-      setLoading(false)
-    })
+    setLoading(true)
+    setPdfUrl(null)
+    setNumPages(0)
+    setPdfError('')
+    fetchConfig()
+      .then((cfg) => {
+        if (cfg?.instructorPdfUrl) setPdfUrl(cfg.instructorPdfUrl)
+      })
+      .catch(() => setPdfError('Failed to load config from Firebase.'))
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -41,6 +49,14 @@ export default function InstructorGuidePage() {
     )
   }
 
+  if (pdfError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-red-500 text-sm gap-2">
+        <p>{pdfError}</p>
+      </div>
+    )
+  }
+
   if (!pdfUrl) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-gray-400 text-sm gap-2">
@@ -49,7 +65,7 @@ export default function InstructorGuidePage() {
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
         <p>No instructor guide uploaded yet.</p>
-        <p className="text-xs text-gray-300">Ask the admin to upload a PDF.</p>
+        <p className="text-xs text-gray-300">Ask the admin to upload a PDF in Settings.</p>
       </div>
     )
   }
@@ -59,8 +75,14 @@ export default function InstructorGuidePage() {
       <Document
         file={pdfUrl}
         onLoadSuccess={({ numPages }) => setNumPages(numPages)}
-        loading={<p className="text-sm text-gray-400 py-8 text-center">Loading PDF…</p>}
-        error={<p className="text-sm text-red-500 py-8 text-center">Failed to load PDF.</p>}
+        onLoadError={(err) => setPdfError(`Could not render PDF: ${err.message}`)}
+        loading={<p className="text-sm text-gray-400 py-8 text-center">Rendering PDF…</p>}
+        error={
+          <div className="text-sm text-red-500 py-8 text-center space-y-1">
+            <p>Failed to load PDF.</p>
+            <p className="text-xs text-gray-400">Check that the Storage rules allow public read and that CORS is not blocking the request.</p>
+          </div>
+        }
       >
         {Array.from({ length: numPages }, (_, i) => (
           <Page
