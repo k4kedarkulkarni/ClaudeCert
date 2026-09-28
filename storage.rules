@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Instructor PDF: public read, admin write
+    match /instructor/{file} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}
