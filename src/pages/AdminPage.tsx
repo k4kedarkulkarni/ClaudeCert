@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
-  fetchQuestions,
+  fetchAllQuestions,
   addQuestion,
   updateQuestion,
   deleteQuestion,
@@ -264,7 +264,7 @@ export default function AdminPage() {
   const [genError, setGenError] = useState('')
 
   useEffect(() => {
-    Promise.all([fetchQuestions(), fetchConfig()]).then(([qs, cfg]) => {
+    Promise.all([fetchAllQuestions(), fetchConfig()]).then(([qs, cfg]) => {
       setQuestions(qs)
       if (cfg) setConfig(cfg)
       setLoadingData(false)
@@ -333,6 +333,12 @@ export default function AdminPage() {
     await deleteQuestion(id)
     setQuestions(questions.filter((q) => q.id !== id))
     setDeleteConfirm(null)
+  }
+
+  const handleToggleDisabled = async (q: Question) => {
+    const newVal = !q.disabled
+    await updateQuestion(q.id, { disabled: newVal })
+    setQuestions(questions.map((item) => item.id === q.id ? { ...item, disabled: newVal } : item))
   }
 
   // ── PDF question bank import ────────────────────────────────────────────────
@@ -423,7 +429,7 @@ export default function AdminPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const tabs: { id: AdminTab; label: string }[] = [
-    { id: 'questions', label: `Questions (${questions.length})` },
+    { id: 'questions', label: `Questions (${questions.filter(q => !q.disabled).length} active${questions.some(q => q.disabled) ? `, ${questions.filter(q => q.disabled).length} hidden` : ''})` },
     { id: 'config', label: 'Settings' },
     { id: 'generate', label: 'AI Generate' },
   ]
@@ -554,8 +560,19 @@ export default function AdminPage() {
               {questions.map((q) => (
                 <div
                   key={q.id}
-                  className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm"
+                  className={`bg-white border rounded-2xl p-4 shadow-sm ${q.disabled ? 'border-rose-200 opacity-60' : 'border-gray-200'}`}
                 >
+                  {q.disabled && (
+                    <div className="flex items-center justify-between mb-3 bg-rose-50 rounded-lg px-3 py-1.5">
+                      <span className="text-xs text-rose-600 font-medium">⛔ Marked irrelevant — excluded from sessions</span>
+                      <button
+                        onClick={() => handleToggleDisabled(q)}
+                        className="text-xs text-indigo-600 hover:underline font-medium"
+                      >
+                        Re-enable
+                      </button>
+                    </div>
+                  )}
                   {editingId === q.id ? (
                     <>
                       <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Editing</h4>

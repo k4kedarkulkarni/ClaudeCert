@@ -6,6 +6,7 @@ export interface Question {
   explanation: string
   topic: string
   createdAt: number
+  disabled?: boolean      // if true, excluded from all sessions
 }
 
 export interface LLMConfig {

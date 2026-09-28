@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchConfig, fetchQuestions } from '../firestore'
+import { fetchConfig, fetchQuestions, updateQuestion } from '../firestore'
 import type { AppConfig, Question, SessionResult } from '../types'
 
 const TIMER_SECONDS = 60
@@ -151,6 +151,7 @@ function QuestionCard({
   onAnswer,
   onNext,
   onBack,
+  onDisable,
 }: {
   question: Question
   index: number
@@ -161,6 +162,7 @@ function QuestionCard({
   onAnswer: (optionIdx: number | null, timeTaken: number) => void
   onNext: () => void
   onBack: () => void
+  onDisable: () => void
 }) {
   const [selected, setSelected] = useState<number | null>(existingResult?.selectedOption ?? null)
   const [revealed, setRevealed] = useState(existingResult !== undefined)
@@ -268,24 +270,40 @@ function QuestionCard({
         <p className="text-center text-sm text-amber-600 font-medium">Time's up!</p>
       )}
 
-      {/* Manual navigation (no-timer mode) */}
+      {/* Manual navigation + mark irrelevant (no-timer mode) */}
       {!timerEnabled && (
-        <div className="flex gap-3 pt-2">
-          <button
-            onClick={onBack}
-            disabled={index === 0}
-            className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1"
-          >
-            ← Back
-          </button>
-          <button
-            onClick={isLast ? onNext : onNext}
-            disabled={!revealed}
-            className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-1"
-          >
-            {isLast ? 'Finish →' : 'Next →'}
-          </button>
-        </div>
+        <>
+          {/* Mark as irrelevant checkbox — only show after answering */}
+          {revealed && (
+            <label className="flex items-center gap-2 cursor-pointer select-none self-start">
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-gray-300 accent-rose-500 cursor-pointer"
+                onChange={(e) => { if (e.target.checked) onDisable() }}
+              />
+              <span className="text-xs text-gray-500 hover:text-rose-600 transition-colors">
+                Mark as irrelevant — remove from future sessions
+              </span>
+            </label>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button
+              onClick={onBack}
+              disabled={index === 0}
+              className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1"
+            >
+              ← Back
+            </button>
+            <button
+              onClick={onNext}
+              disabled={!revealed}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-1"
+            >
+              {isLast ? 'Finish →' : 'Next →'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
@@ -426,6 +444,20 @@ export default function CertificationPage() {
     if (currentIdx > 0) setCurrentIdx((i) => i - 1)
   }
 
+  const handleDisable = async () => {
+    const q = sessionQuestions[currentIdx]
+    await updateQuestion(q.id, { disabled: true })
+    // Remove from the local session list so it doesn't appear if user goes Back
+    setSessionQuestions((prev) => prev.filter((_, i) => i !== currentIdx))
+    setResults((prev) => prev.filter((_, i) => i !== currentIdx))
+    // Stay on same index (now points to the next question) or go to summary
+    setCurrentIdx((idx) => {
+      const newLen = sessionQuestions.length - 1
+      if (newLen === 0) return -2
+      return Math.min(idx, newLen - 1)
+    })
+  }
+
   if (loadingData) {
     return (
       <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
@@ -501,6 +533,7 @@ export default function CertificationPage() {
         onAnswer={handleAnswer}
         onNext={handleNext}
         onBack={handleBack}
+        onDisable={handleDisable}
       />
     </div>
   )

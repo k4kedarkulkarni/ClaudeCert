@@ -16,7 +16,17 @@ import type { Question, AppConfig } from './types'
 
 // ── Questions ────────────────────────────────────────────────────────────────
 
+// Fetches only active (non-disabled) questions — used by the certification page
 export async function fetchQuestions(): Promise<Question[]> {
+  const q = query(collection(db, 'questions'), orderBy('createdAt', 'desc'))
+  const snap = await getDocs(q)
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as Question))
+    .filter((q) => !q.disabled)
+}
+
+// Fetches all questions including disabled ones — used by admin
+export async function fetchAllQuestions(): Promise<Question[]> {
   const q = query(collection(db, 'questions'), orderBy('createdAt', 'desc'))
   const snap = await getDocs(q)
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Question))
