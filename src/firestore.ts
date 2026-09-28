@@ -59,10 +59,16 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   await setDoc(doc(db, 'config', CONFIG_DOC), config)
 }
 
-// ── PDF Upload ───────────────────────────────────────────────────────────────
+// ── PDF / File Uploads ────────────────────────────────────────────────────────
 
 export async function uploadInstructorPdf(file: File): Promise<string> {
   const storageRef = ref(storage, 'instructor/guide.pdf')
+  await uploadBytes(storageRef, file)
+  return getDownloadURL(storageRef)
+}
+
+export async function uploadStudyGuide(file: File): Promise<string> {
+  const storageRef = ref(storage, 'study/guide.pdf')
   await uploadBytes(storageRef, file)
   return getDownloadURL(storageRef)
 }

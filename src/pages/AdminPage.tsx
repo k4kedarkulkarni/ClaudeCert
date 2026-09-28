@@ -9,8 +9,9 @@ import {
   fetchConfig,
   saveConfig,
   uploadInstructorPdf,
+  uploadStudyGuide,
 } from '../firestore'
-import { generateQuestions, extractQuestionsFromPdf, extractTextFromPdf } from '../llm'
+import { generateQuestions, extractQuestionsFromPdf, extractTextFromPdf, extractTextFromFile, extractTextFromPdfUrl } from '../llm'
 import type { AppConfig, LLMConfig, Question } from '../types'
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -18,6 +19,8 @@ const DEFAULT_CONFIG: AppConfig = {
   llm2: { provider: 'openai', apiKey: '', model: 'gpt-4o' },
   defaultQuestionCount: 10,
   instructorPdfUrl: '',
+  studyGuideUrl: '',
+  systemPromptText: '',
 }
 
 // ── Small reusable components ────────────────────────────────────────────────
@@ -255,6 +258,14 @@ export default function AdminPage() {
   const [importError, setImportError] = useState('')
   const [importMsg, setImportMsg] = useState('')
 
+  // Study guide upload state
+  const [uploadingStudyGuide, setUploadingStudyGuide] = useState(false)
+  const [studyGuideMsg, setStudyGuideMsg] = useState('')
+
+  // System prompt upload state
+  const [uploadingSystemPrompt, setUploadingSystemPrompt] = useState(false)
+  const [systemPromptMsg, setSystemPromptMsg] = useState('')
+
   // AI generation state
   const [genCount, setGenCount] = useState(5)
   const [genTopic, setGenTopic] = useState('')
@@ -391,6 +402,44 @@ export default function AdminPage() {
 
   // ── AI generation actions ───────────────────────────────────────────────────
 
+  const handleStudyGuideUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingStudyGuide(true)
+    setStudyGuideMsg('')
+    try {
+      const url = await uploadStudyGuide(file)
+      const updated = { ...config, studyGuideUrl: url }
+      setConfig(updated)
+      await saveConfig(updated)
+      setStudyGuideMsg('Study guide uploaded and saved.')
+    } catch (err: unknown) {
+      setStudyGuideMsg(`Upload failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setUploadingStudyGuide(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleSystemPromptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingSystemPrompt(true)
+    setSystemPromptMsg('')
+    try {
+      const text = await extractTextFromFile(file)
+      const updated = { ...config, systemPromptText: text }
+      setConfig(updated)
+      await saveConfig(updated)
+      setSystemPromptMsg(`Document uploaded (${text.length.toLocaleString()} chars). Chatbot will use this as system context.`)
+    } catch (err: unknown) {
+      setSystemPromptMsg(`Upload failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setUploadingSystemPrompt(false)
+      e.target.value = ''
+    }
+  }
+
   const handleGenerate = async () => {
     const llmCfg = config[genLlm]
     if (!llmCfg || llmCfg.provider === 'none') {
@@ -401,9 +450,17 @@ export default function AdminPage() {
     setGenError('')
     setGenResults([])
     try {
-      // Pass a random sample of existing questions as few-shot style examples
+      // Fetch study guide text if available
+      let studyGuideText: string | undefined
+      if (config.studyGuideUrl) {
+        try {
+          studyGuideText = await extractTextFromPdfUrl(config.studyGuideUrl)
+        } catch {
+          // Non-fatal — proceed without study guide
+        }
+      }
       const shuffled = [...questions].sort(() => Math.random() - 0.5)
-      const results = await generateQuestions(llmCfg, genCount, genTopic || undefined, shuffled.slice(0, 3))
+      const results = await generateQuestions(llmCfg, genCount, genTopic || undefined, shuffled.slice(0, 3), studyGuideText)
       setGenResults(results)
     } catch (err: unknown) {
       setGenError(err instanceof Error ? err.message : 'Generation failed')
@@ -705,6 +762,56 @@ export default function AdminPage() {
                   </div>
                   {uploadingPdf && <p className="text-xs text-gray-400">Uploading…</p>}
                   {pdfMsg && <p className="text-xs text-green-700">{pdfMsg}</p>}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Study Guide PDF">
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Upload a PDF study guide. AI Question Generator will use it as source material when generating new questions.</p>
+                  {config.studyGuideUrl && (
+                    <p className="text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">✓ Study guide currently uploaded</p>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Upload PDF</label>
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handleStudyGuideUpload}
+                      disabled={uploadingStudyGuide}
+                      className="block w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100 transition-colors"
+                    />
+                  </div>
+                  {uploadingStudyGuide && <p className="text-xs text-gray-400">Uploading…</p>}
+                  {studyGuideMsg && <p className={`text-xs ${studyGuideMsg.startsWith('Upload failed') ? 'text-red-600' : 'text-green-700'}`}>{studyGuideMsg}</p>}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="AI Assistant System Prompt">
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Upload a PDF, .txt, or .md file. Its text will be stored as the chatbot's system prompt and served with Anthropic prompt caching, so the document is only sent once per 5-minute cache window.</p>
+                  {config.systemPromptText && (
+                    <p className="text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                      ✓ System prompt loaded ({config.systemPromptText.length.toLocaleString()} chars)
+                    </p>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Upload document (PDF, TXT, MD)</label>
+                    <input
+                      type="file"
+                      accept="application/pdf,text/plain,text/markdown,.md,.txt"
+                      onChange={handleSystemPromptUpload}
+                      disabled={uploadingSystemPrompt}
+                      className="block w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100 transition-colors"
+                    />
+                  </div>
+                  {uploadingSystemPrompt && <p className="text-xs text-gray-400">Processing…</p>}
+                  {systemPromptMsg && <p className={`text-xs ${systemPromptMsg.startsWith('Upload failed') ? 'text-red-600' : 'text-green-700'}`}>{systemPromptMsg}</p>}
+                  {config.systemPromptText && (
+                    <details className="text-xs text-gray-400">
+                      <summary className="cursor-pointer hover:text-gray-600">Preview first 500 chars</summary>
+                      <pre className="mt-2 bg-gray-50 rounded-lg p-2 whitespace-pre-wrap leading-relaxed">{config.systemPromptText.slice(0, 500)}…</pre>
+                    </details>
+                  )}
                 </div>
               </SectionCard>
 

@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import InstructorGuidePage from './InstructorGuidePage'
 import CertificationPage from './CertificationPage'
+import ChatBotPage from './ChatBotPage'
 
-type Tab = 'guide' | 'cert'
+type Tab = 'cert' | 'chat' | 'guide'
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('cert')
@@ -31,13 +32,14 @@ export default function HomePage() {
           {/* Tabs */}
           <div className="flex">
             {([
-              { id: 'cert', label: '📋 Certification' },
+              { id: 'cert',  label: '📋 Certification' },
+              { id: 'chat',  label: '🤖 AI Assistant' },
               { id: 'guide', label: '📖 Instructor Guide' },
             ] as { id: Tab; label: string }[]).map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`flex-1 text-sm py-2.5 border-b-2 transition-colors font-medium ${
+                className={`flex-1 text-xs sm:text-sm py-2.5 border-b-2 transition-colors font-medium whitespace-nowrap ${
                   tab === t.id
                     ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -52,7 +54,9 @@ export default function HomePage() {
 
       {/* Tab content */}
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-5">
-        {tab === 'cert' ? <CertificationPage /> : <InstructorGuidePage />}
+        {tab === 'cert'  && <CertificationPage />}
+        {tab === 'chat'  && <ChatBotPage />}
+        {tab === 'guide' && <InstructorGuidePage />}
       </main>
     </div>
   )
